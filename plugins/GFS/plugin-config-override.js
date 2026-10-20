@@ -503,11 +503,19 @@ const openGuideModal = (manager) => {
         </div>
       </div>
       <div v-else class="flex">
+        <input
+          ref="filePicker"
+          type="file"
+          accept=".json,application/json"
+          style="display: none;"
+          @change="handleFileChange"
+        />
         <Button class="w-full" type="primary" @click="handleLocal">选择本地 JSON 文件</Button>
       </div>
     </div>
     `,
     setup() {
+      const filePicker = ref(null)
       const profileOptions = computed(() =>
         Plugins.useProfilesStore().profiles.map((profile) => ({
           label: profile.name,
@@ -523,10 +531,25 @@ const openGuideModal = (manager) => {
         return true
       }
 
-      const handleLocal = async () => {
+      const handleLocal = () => {
         if (!ensureProfileSelected()) return
-        const success = await manager.handleAddLocal(selectedProfileId.value)
-        if (success) modal.close()
+        filePicker.value?.click()
+      }
+
+      const handleFileChange = async (event) => {
+        const input = event.target
+        const file = input.files?.[0]
+        if (!file) return
+
+        try {
+          const success = await manager.handleAddLocal(selectedProfileId.value, file)
+          if (success) modal.close()
+        } catch (error) {
+          Plugins.message.error(`导入失败：${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+          // Allow importing the same file again after a failed validation.
+          input.value = ''
+        }
       }
 
       const handleRemote = async () => {
@@ -545,7 +568,9 @@ const openGuideModal = (manager) => {
         enableCache,
         selectedProfileId,
         profileOptions,
+        filePicker,
         handleLocal,
+        handleFileChange,
         handleRemote,
       }
     },
@@ -656,13 +681,8 @@ class ConfigOverrideManager {
     this.configs.value = await readManagerConfigs()
   }
 
-  async handleAddLocal(profileId) {
+  async handleAddLocal(profileId, file) {
     ensureProfileUnbound(profileId)
-
-    const file = await selectLocalJsonFile()
-    if (!file) {
-      return false
-    }
 
     const content = await file.text()
 
@@ -832,35 +852,3 @@ class ConfigOverrideManager {
   }
 }
 
-const selectLocalJsonFile = () => {
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.style.display = 'none'
-    input.multiple = false
-    input.accept = '.json, application/json'
-
-    const cleanup = () => {
-      window.removeEventListener('focus', onFocus)
-      document.body.removeChild(input)
-    }
-
-    const onFocus = () => {
-      setTimeout(() => {
-        if (input.files?.length === 0) {
-          resolve(null)
-          cleanup()
-        }
-      }, 200)
-    }
-
-    input.addEventListener('change', () => {
-      resolve(input.files?.[0] ?? null)
-      cleanup()
-    })
-
-    window.addEventListener('focus', onFocus, { once: true })
-    document.body.appendChild(input)
-    input.click()
-  })
-}
